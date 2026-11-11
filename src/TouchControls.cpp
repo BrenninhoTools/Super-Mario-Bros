@@ -13,7 +13,6 @@ namespace
 const SDL_Color kPlate = {178, 178, 178, 255};
 const SDL_Color kPlateEdge = {120, 120, 120, 255};
 const SDL_Color kCross = {28, 28, 28, 255};
-const SDL_Color kCrossPressed = {70, 70, 70, 255};
 const SDL_Color kArrow = {90, 90, 90, 255};
 const SDL_Color kArrowPressed = {255, 205, 40, 255};
 const SDL_Color kRed = {214, 32, 44, 255};
@@ -25,23 +24,15 @@ const SDL_Color kWhite = {255, 255, 255, 255};
 const SDL_Color kPillDark = {34, 34, 34, 255};
 const SDL_Color kPillPressed = {90, 90, 90, 255};
 const SDL_Color kRunGlow = {255, 205, 40, 255};
-
-void fillRect(SDL_Renderer* renderer, float x, float y, float w, float h, SDL_Color color)
-{
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
-    SDL_FRect rect = {x, y, w, h};
-    SDL_RenderFillRectF(renderer, &rect);
-}
 }
 
 void TouchControls::layout(int width, int height)
 {
     unit = (float)std::min(width, height);
     float margin = unit * 0.06f;
-    dpad.r = unit * 0.17f;
-    dpad.x = margin + dpad.r;
-    dpad.y = height - margin - dpad.r;
+    stick.r = unit * 0.17f;
+    stick.x = margin + stick.r;
+    stick.y = height - margin - stick.r;
     buttonA.r = unit * 0.085f;
     buttonA.x = width - margin - buttonA.r;
     buttonA.y = height - margin - buttonA.r * 2.4f;
@@ -78,6 +69,12 @@ void TouchControls::handleEvent(const SDL_Event& event, int outputWidth, int out
         pendingTap = true;
         SDL_FPoint point = {event.tfinger.x * outputWidth, event.tfinger.y * outputHeight};
         fingers[event.tfinger.fingerId] = point;
+        if (!stickActive && inCircle(stick, point.x, point.y, 1.6f))
+        {
+            stickActive = true;
+            stickFinger = event.tfinger.fingerId;
+            stickPoint = point;
+        }
         if (visible && inCircle(buttonB, point.x, point.y, 1.35f))
         {
             runLatched = !runLatched;
@@ -86,9 +83,17 @@ void TouchControls::handleEvent(const SDL_Event& event, int outputWidth, int out
     }
     case SDL_FINGERMOTION:
         fingers[event.tfinger.fingerId] = {event.tfinger.x * outputWidth, event.tfinger.y * outputHeight};
+        if (stickActive && event.tfinger.fingerId == stickFinger)
+        {
+            stickPoint = fingers[event.tfinger.fingerId];
+        }
         break;
     case SDL_FINGERUP:
         fingers.erase(event.tfinger.fingerId);
+        if (stickActive && event.tfinger.fingerId == stickFinger)
+        {
+            stickActive = false;
+        }
         break;
     default:
         break;
@@ -102,12 +107,34 @@ bool TouchControls::tapped()
     return result;
 }
 
-uint8_t TouchControls::dpadAt(float x, float y) const
+SDL_FPoint TouchControls::knobOffset() const
 {
-    float dx = x - dpad.x;
-    float dy = y - dpad.y;
+    if (!stickActive)
+    {
+        return {0.0f, 0.0f};
+    }
+    float dx = stickPoint.x - stick.x;
+    float dy = stickPoint.y - stick.y;
     float distance = std::sqrt(dx * dx + dy * dy);
-    if (distance > dpad.r * 1.5f || distance < dpad.r * 0.12f)
+    float limit = stick.r * 0.55f;
+    if (distance > limit)
+    {
+        dx = dx / distance * limit;
+        dy = dy / distance * limit;
+    }
+    return {dx, dy};
+}
+
+uint8_t TouchControls::stickButtons() const
+{
+    if (!stickActive)
+    {
+        return 0;
+    }
+    float dx = stickPoint.x - stick.x;
+    float dy = stickPoint.y - stick.y;
+    float distance = std::sqrt(dx * dx + dy * dy);
+    if (distance < stick.r * 0.22f)
     {
         return 0;
     }
@@ -143,53 +170,41 @@ uint8_t TouchControls::buttonsAt(float x, float y) const
 
 uint8_t TouchControls::buttons() const
 {
-    uint8_t result = runLatched ? ButtonB : 0;
+    uint8_t result = (runLatched ? ButtonB : 0) | stickButtons();
     for (const auto& finger : fingers)
     {
-        result |= dpadAt(finger.second.x, finger.second.y);
+        if (stickActive && finger.first == stickFinger)
+        {
+            continue;
+        }
         result |= buttonsAt(finger.second.x, finger.second.y);
     }
     return result;
 }
 
-void TouchControls::drawDpad(SDL_Renderer* renderer, uint8_t pressed) const
+void TouchControls::drawStick(SDL_Renderer* renderer, uint8_t pressed) const
 {
-    fillCircle(renderer, dpad.x, dpad.y, dpad.r * 1.08f, kPlateEdge);
-    fillCircle(renderer, dpad.x, dpad.y, dpad.r, kPlate);
+    fillCircle(renderer, stick.x, stick.y, stick.r * 1.08f, kPlateEdge);
+    fillCircle(renderer, stick.x, stick.y, stick.r, kPlate);
+    fillCircle(renderer, stick.x, stick.y, stick.r * 0.86f, kCross);
 
-    float arm = dpad.r * 0.86f;
-    float half = dpad.r * 0.29f;
-    fillRect(renderer, dpad.x - half, dpad.y - arm, half * 2, arm * 2, kCross);
-    fillRect(renderer, dpad.x - arm, dpad.y - half, arm - half, half * 2, kCross);
-    fillRect(renderer, dpad.x + half, dpad.y - half, arm - half, half * 2, kCross);
+    float tip = stick.r * 0.8f;
+    float base = stick.r * 0.66f;
+    float wing = stick.r * 0.1f;
+    fillTriangle(renderer, {stick.x, stick.y - tip}, {stick.x - wing, stick.y - base}, {stick.x + wing, stick.y - base}, (pressed & ButtonUp) ? kArrowPressed : kArrow);
+    fillTriangle(renderer, {stick.x, stick.y + tip}, {stick.x + wing, stick.y + base}, {stick.x - wing, stick.y + base}, (pressed & ButtonDown) ? kArrowPressed : kArrow);
+    fillTriangle(renderer, {stick.x - tip, stick.y}, {stick.x - base, stick.y + wing}, {stick.x - base, stick.y - wing}, (pressed & ButtonLeft) ? kArrowPressed : kArrow);
+    fillTriangle(renderer, {stick.x + tip, stick.y}, {stick.x + base, stick.y - wing}, {stick.x + base, stick.y + wing}, (pressed & ButtonRight) ? kArrowPressed : kArrow);
 
-    float inner = half * 0.85f;
-    if (pressed & ButtonUp)
-    {
-        fillRect(renderer, dpad.x - inner, dpad.y - arm + half * 0.15f, inner * 2, arm - half, kCrossPressed);
-    }
-    if (pressed & ButtonDown)
-    {
-        fillRect(renderer, dpad.x - inner, dpad.y + half, inner * 2, arm - half - half * 0.15f, kCrossPressed);
-    }
-    if (pressed & ButtonLeft)
-    {
-        fillRect(renderer, dpad.x - arm + half * 0.15f, dpad.y - inner, arm - half, inner * 2, kCrossPressed);
-    }
-    if (pressed & ButtonRight)
-    {
-        fillRect(renderer, dpad.x + half, dpad.y - inner, arm - half - half * 0.15f, inner * 2, kCrossPressed);
-    }
-
-    fillCircle(renderer, dpad.x, dpad.y, half * 0.55f, kCrossPressed);
-
-    float tip = arm * 0.88f;
-    float base = arm * 0.55f;
-    float wing = half * 0.55f;
-    fillTriangle(renderer, {dpad.x, dpad.y - tip}, {dpad.x - wing, dpad.y - base}, {dpad.x + wing, dpad.y - base}, (pressed & ButtonUp) ? kArrowPressed : kArrow);
-    fillTriangle(renderer, {dpad.x, dpad.y + tip}, {dpad.x + wing, dpad.y + base}, {dpad.x - wing, dpad.y + base}, (pressed & ButtonDown) ? kArrowPressed : kArrow);
-    fillTriangle(renderer, {dpad.x - tip, dpad.y}, {dpad.x - base, dpad.y + wing}, {dpad.x - base, dpad.y - wing}, (pressed & ButtonLeft) ? kArrowPressed : kArrow);
-    fillTriangle(renderer, {dpad.x + tip, dpad.y}, {dpad.x + base, dpad.y - wing}, {dpad.x + base, dpad.y + wing}, (pressed & ButtonRight) ? kArrowPressed : kArrow);
+    SDL_FPoint offset = knobOffset();
+    float kx = stick.x + offset.x;
+    float ky = stick.y + offset.y;
+    float knob = stick.r * 0.42f;
+    fillCircle(renderer, kx, ky + knob * 0.08f, knob * 1.04f, kRedDark);
+    fillCircle(renderer, kx, ky, knob, stickActive ? kRedPressed : kRed);
+    fillCircle(renderer, kx, ky, knob * 0.62f, kRedDark);
+    fillCircle(renderer, kx, ky, knob * 0.54f, stickActive ? kRedPressed : kRed);
+    fillCircle(renderer, kx - knob * 0.4f, ky - knob * 0.42f, knob * 0.16f, kRedShine);
 }
 
 void TouchControls::drawRoundButton(SDL_Renderer* renderer, const Circle& c, const char* label, bool pressed, bool latched) const
@@ -240,7 +255,7 @@ void TouchControls::draw(SDL_Renderer* renderer) const
             touched |= ButtonB;
         }
     }
-    drawDpad(renderer, pressed);
+    drawStick(renderer, pressed);
     drawRoundButton(renderer, buttonB, "B", (touched & ButtonB) != 0, runLatched);
     drawRoundButton(renderer, buttonA, "A", (pressed & ButtonA) != 0, false);
     drawPill(renderer, buttonSelect, "SELECT", (pressed & ButtonSelect) != 0);

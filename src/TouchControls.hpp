@@ -37,16 +37,20 @@ private:
         float h = 0;
     };
 
-    uint8_t dpadAt(float x, float y) const;
+    uint8_t stickButtons() const;
+    SDL_FPoint knobOffset() const;
     uint8_t buttonsAt(float x, float y) const;
     bool inCircle(const Circle& c, float x, float y, float scale) const;
     bool inPill(const Pill& p, float x, float y) const;
-    void drawDpad(SDL_Renderer* renderer, uint8_t pressed) const;
+    void drawStick(SDL_Renderer* renderer, uint8_t pressed) const;
     void drawRoundButton(SDL_Renderer* renderer, const Circle& c, const char* label, bool pressed, bool latched) const;
     void drawPill(SDL_Renderer* renderer, const Pill& p, const char* label, bool pressed) const;
 
     std::map<SDL_FingerID, SDL_FPoint> fingers;
-    Circle dpad;
+    Circle stick;
+    SDL_FingerID stickFinger = 0;
+    bool stickActive = false;
+    SDL_FPoint stickPoint = {0, 0};
     Circle buttonA;
     Circle buttonB;
     Pill buttonSelect;
