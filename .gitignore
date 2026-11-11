@@ -66,3 +66,21 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# Build output
+build/
+cmake-build-*/
+out/
+
+# Android
+android/.gradle/
+android/app/.cxx/
+android/app/build/
+android/build/
+android/local.properties
+*.apk
+*.aab
+
+# ROMs
+*.nes
+*.NES
