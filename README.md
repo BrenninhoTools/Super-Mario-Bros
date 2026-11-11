@@ -28,7 +28,7 @@ The program checks the PRG data and only accepts these versions.
 
 Extra keys: `F11` or `Alt+Enter` fullscreen, `F2` reset, `P` pause, `Esc` quit.
 
-On Android, on-screen touch controls are shown. Touching between A and B presses both. Using a gamepad hides the touch controls, and touching the screen shows them again.
+On Android, NES-style touch controls are shown. The **B** button is a run toggle: tap it once and B stays held (a yellow ring and `RUN` appear), tap it again to release. Each time it turns on it also throws a fireball when Mario has the fire flower. Using a gamepad hides the touch controls, and touching the screen shows them again.
 
 ## Building
 
