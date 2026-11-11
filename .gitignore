@@ -84,3 +84,7 @@ android/local.properties
 # ROMs
 *.nes
 *.NES
+
+# Python
+__pycache__/
+*.pyc
