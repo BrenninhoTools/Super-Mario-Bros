@@ -28,9 +28,11 @@ The program checks the PRG data and only accepts these versions.
 | Start    | Enter                 | Start          |
 | Select   | Right Shift / Tab     | Back           |
 
-Extra keys: `F11` or `Alt+Enter` fullscreen, `F2` reset, `P` pause, `F3` performance overlay, `Esc` quit.
+Extra keys: `F11` or `Alt+Enter` fullscreen window, `F4` switch between filling the screen and the original aspect ratio, `F2` reset, `P` pause, `F3` performance overlay, `Esc` quit.
 
-On Android and iOS, NES-style touch controls are shown, with an analog stick for movement (8 directions, the finger that grabs it keeps control even outside the base). The **B** button is a run toggle: tap it once and B stays held (a yellow ring and `RUN` appear), tap it again to release. Each time it turns on it also throws a fireball when Mario has the fire flower. Using a gamepad hides the touch controls, and touching the screen shows them again.
+The game fills the whole screen by default. The button in the top-right corner (shown when the mouse moves on desktop, always on mobile) switches back to the original aspect ratio, and the choice is saved.
+
+On Android and iOS, NES-style touch controls are shown, with an analog stick for movement (8 directions, the finger that grabs it keeps control even outside the base). **A** jumps and **B** runs or throws fireballs while held. The yellow **C** button is a run toggle: tap it once and B stays held (a green ring and `RUN` appear), tap it again to release. While running with C, tapping B still throws a fireball. In fill mode the controls become translucent so the game stays visible. Using a gamepad hides the touch controls, and touching the screen shows them again.
 
 ## Building
 

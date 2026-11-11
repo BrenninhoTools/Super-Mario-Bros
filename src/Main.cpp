@@ -338,8 +338,97 @@ struct PerformanceStats
     }
 };
 
-SDL_Rect gameViewport(int width, int height)
+bool loadFillSetting()
 {
+    SDL_RWops* file = SDL_RWFromFile((storageDirectory() + "settings.cfg").c_str(), "rb");
+    if (!file)
+    {
+        return true;
+    }
+    char buffer[256] = {};
+    size_t read = SDL_RWread(file, buffer, 1, sizeof(buffer) - 1);
+    SDL_RWclose(file);
+    std::string text(buffer, read);
+    return text.find("fill=0") == std::string::npos;
+}
+
+void saveFillSetting(bool fill)
+{
+    SDL_RWops* file = SDL_RWFromFile((storageDirectory() + "settings.cfg").c_str(), "wb");
+    if (!file)
+    {
+        return;
+    }
+    std::string text = fill ? "fill=1\n" : "fill=0\n";
+    SDL_RWwrite(file, text.data(), 1, text.size());
+    SDL_RWclose(file);
+}
+
+struct ScreenModeButton
+{
+    SDL_FRect rect = {0, 0, 0, 0};
+
+    void layout(int width, int height, float insetRight)
+    {
+        float unit = (float)std::min(width, height);
+        float size = unit * (kMobile ? 0.085f : 0.06f);
+        float margin = unit * 0.035f;
+        rect = {width - std::max(margin, insetRight) - size, margin, size, size};
+    }
+
+    bool contains(float x, float y) const
+    {
+        float pad = rect.w * 0.25f;
+        return x >= rect.x - pad && x <= rect.x + rect.w + pad && y >= rect.y - pad && y <= rect.y + rect.h + pad;
+    }
+
+    void draw(SDL_Renderer* renderer, bool fill) const
+    {
+        float cx = rect.x + rect.w * 0.5f;
+        float cy = rect.y + rect.h * 0.5f;
+        smb::fillCircle(renderer, cx, cy, rect.w * 0.5f, {0, 0, 0, 150});
+        float half = rect.w * 0.24f;
+        float arm = rect.w * 0.14f;
+        float thick = std::max(2.0f, rect.w * 0.065f);
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 230);
+        for (int sx = -1; sx <= 1; sx += 2)
+        {
+            for (int sy = -1; sy <= 1; sy += 2)
+            {
+                float px;
+                float py;
+                float dx;
+                float dy;
+                if (fill)
+                {
+                    px = cx + sx * half * 0.3f;
+                    py = cy + sy * half * 0.3f;
+                    dx = (float)sx;
+                    dy = (float)sy;
+                }
+                else
+                {
+                    px = cx + sx * half;
+                    py = cy + sy * half;
+                    dx = (float)-sx;
+                    dy = (float)-sy;
+                }
+                SDL_FRect horizontal = {dx > 0 ? px : px - arm, py - thick * 0.5f, arm, thick};
+                SDL_FRect vertical = {px - thick * 0.5f, dy > 0 ? py : py - arm, thick, arm};
+                SDL_RenderFillRectF(renderer, &horizontal);
+                SDL_RenderFillRectF(renderer, &vertical);
+            }
+        }
+    }
+};
+
+SDL_Rect gameViewport(int width, int height, bool fill)
+{
+    if (fill)
+    {
+        return {0, 0, width, height};
+    }
     const int sourceHeight = 224;
     float scale = std::min(width / 256.0f, height / (float)sourceHeight);
     if (!kMobile && scale >= 1.0f)
@@ -406,6 +495,14 @@ int main(int argc, char** argv)
     smb::FramePacer pacer;
     pacer.setRefreshRate(displayRefreshRate(window));
     PerformanceStats stats;
+    bool fillScreen = loadFillSetting();
+    ScreenModeButton modeButton;
+    double lastMouseTime = -1000.0;
+    bool cursorVisible = true;
+    auto toggleFill = [&]() {
+        fillScreen = !fillScreen;
+        saveFillSetting(fillScreen);
+    };
 
     std::string status;
     bool romLoaded = false;
@@ -462,6 +559,7 @@ int main(int argc, char** argv)
         smb::iosSafeAreaInsets(window, outputWidth, insetLeft, insetRight, insetBottom);
 #endif
         touch.layout(outputWidth, outputHeight, insetLeft, insetRight, insetBottom);
+        modeButton.layout(outputWidth, outputHeight, insetRight);
 
         SDL_Event event;
         while (SDL_PollEvent(&event))
@@ -516,6 +614,10 @@ int main(int argc, char** argv)
                 {
                     stats.visible = !stats.visible;
                 }
+                else if (event.key.keysym.scancode == SDL_SCANCODE_F4)
+                {
+                    toggleFill();
+                }
                 touch.visible = false;
                 break;
             case SDL_CONTROLLERDEVICEADDED:
@@ -531,14 +633,39 @@ int main(int argc, char** argv)
                     touch.visible = false;
                 }
                 break;
+            case SDL_MOUSEMOTION:
+                if (event.motion.which != SDL_TOUCH_MOUSEID)
+                {
+                    lastMouseTime = clock;
+                }
+                break;
+            case SDL_MOUSEBUTTONDOWN:
+                if (event.button.which != SDL_TOUCH_MOUSEID && event.button.button == SDL_BUTTON_LEFT && romLoaded)
+                {
+                    int windowWidth = 1;
+                    int windowHeight = 1;
+                    SDL_GetWindowSize(window, &windowWidth, &windowHeight);
+                    float mx = event.button.x * (float)outputWidth / std::max(1, windowWidth);
+                    float my = event.button.y * (float)outputHeight / std::max(1, windowHeight);
+                    lastMouseTime = clock;
+                    if (modeButton.contains(mx, my))
+                    {
+                        toggleFill();
+                    }
+                }
+                break;
             case SDL_FINGERDOWN:
+                if (romLoaded && modeButton.contains(event.tfinger.x * outputWidth, event.tfinger.y * outputHeight))
+                {
+                    toggleFill();
+                    break;
+                }
+                touch.handleEvent(event, outputWidth, outputHeight);
+                touch.visible = true;
+                break;
             case SDL_FINGERMOTION:
             case SDL_FINGERUP:
                 touch.handleEvent(event, outputWidth, outputHeight);
-                if (event.type == SDL_FINGERDOWN)
-                {
-                    touch.visible = true;
-                }
                 break;
             case SDL_DROPFILE:
             {
@@ -661,7 +788,7 @@ int main(int argc, char** argv)
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
         SDL_Rect source = {0, 8, 256, 224};
-        SDL_Rect target = gameViewport(outputWidth, outputHeight);
+        SDL_Rect target = gameViewport(outputWidth, outputHeight, fillScreen);
         SDL_RenderCopy(renderer, texture, &source, &target);
         if (game.faulted())
         {
@@ -679,7 +806,18 @@ int main(int argc, char** argv)
         }
         if (clock - input.lastPadTime > 5.0 || !kMobile)
         {
-            touch.draw(renderer);
+            touch.draw(renderer, fillScreen ? 0.6f : 1.0f);
+        }
+        bool mouseActive = clock - lastMouseTime < 2.5;
+        if (kMobile || mouseActive)
+        {
+            modeButton.draw(renderer, fillScreen);
+        }
+        bool wantCursor = kMobile || mouseActive;
+        if (!kMobile && wantCursor != cursorVisible)
+        {
+            SDL_ShowCursor(wantCursor ? SDL_ENABLE : SDL_DISABLE);
+            cursorVisible = wantCursor;
         }
         stats.draw(renderer, pacer, audio, outputHeight);
         SDL_RenderPresent(renderer);
