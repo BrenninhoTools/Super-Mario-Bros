@@ -6,7 +6,12 @@ The game is not emulated. The original 6502 code from the disassembly in `asm/sm
 
 ## ROM
 
-No Nintendo assets are included. You need your own dump of **Super Mario Bros. (World)** (`.nes`, iNES header optional). The program checks the PRG data and only accepts that version.
+No Nintendo assets are included. You need your own dump of one of these cartridges:
+
+- **Super Mario Bros. (World)** (`.nes`, iNES header optional)
+- **Super Mario Bros. / Duck Hunt (USA)** (mapper 66 multicart): only the Super Mario Bros. banks are extracted, and the multicart reset stub is restored to the original code
+
+The program checks the PRG data and only accepts these versions.
 
 - **Windows / Linux:** drag and drop the ROM onto the window on first launch, or place it next to the executable as `baserom.nes`, or pass its path as the first argument. It is copied to the user data folder so it only needs to be done once.
 - **Android:** the file picker opens on first launch. Select the ROM and it is stored in the app's private storage.

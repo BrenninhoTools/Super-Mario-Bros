@@ -13,6 +13,13 @@ namespace
 {
 const size_t kPrgSize = 0x8000;
 const size_t kChrSize = 0x2000;
+const uint32_t kSmbChrCrc = 0x406061CDu;
+const uint8_t kOriginalReset[8] = {0xD8, 0xA9, 0x10, 0x8D, 0x00, 0x20, 0xA2, 0xFF};
+
+bool isMultiCartStub(const uint8_t* reset)
+{
+    return reset[0] == 0xA9 && reset[2] == 0x8D && reset[5] == 0x4C && reset[6] == 0x00 && reset[7] == 0x80;
+}
 }
 
 uint32_t Rom::crc32(const uint8_t* data, size_t size)
@@ -58,35 +65,76 @@ bool Rom::loadFile(const std::string& path, std::string& error)
 bool Rom::loadMemory(const uint8_t* data, size_t size, std::string& error)
 {
     isLoaded = false;
-    size_t offset = 0;
+    size_t prgOffset = 0;
+    size_t prgBanks = 1;
+    size_t chrBanks = 1;
+    int mapper = 0;
     if (size >= 16 && std::memcmp(data, "NES\x1A", 4) == 0)
     {
-        uint8_t prgBanks = data[4];
-        uint8_t chrBanks = data[5];
         bool cleanHeader = data[12] == 0 && data[13] == 0 && data[14] == 0 && data[15] == 0;
-        int mapper = (data[6] >> 4) | (cleanHeader ? (data[7] & 0xF0) : 0);
-        if (prgBanks != 2 || chrBanks != 1 || mapper != 0)
+        mapper = (data[6] >> 4) | (cleanHeader ? (data[7] & 0xF0) : 0);
+        prgBanks = data[4] / 2;
+        chrBanks = data[5];
+        prgOffset = 16 + ((data[6] & 0x04) ? 512 : 0);
+        bool supported = (mapper == 0 && data[4] == 2 && chrBanks == 1) ||
+                         (mapper == 66 && prgBanks >= 1 && chrBanks >= 1 && (data[4] & 1) == 0);
+        if (!supported)
         {
             error = "This is not a Super Mario Bros. ROM (wrong mapper or size)";
             return false;
         }
-        offset = 16 + ((data[6] & 0x04) ? 512 : 0);
     }
-    if (size < offset + kPrgSize + kChrSize)
+    size_t chrOffset = prgOffset + prgBanks * kPrgSize;
+    if (size < chrOffset + chrBanks * kChrSize)
     {
         error = "The ROM file is too small";
         return false;
     }
-    uint32_t crc = crc32(data + offset, kPrgSize);
-    if (crc != Cpu::kPrgCrc)
+
+    std::vector<uint8_t> bank;
+    size_t found = prgBanks;
+    uint32_t firstCrc = 0;
+    for (size_t i = 0; i < prgBanks; i++)
+    {
+        bank.assign(data + prgOffset + i * kPrgSize, data + prgOffset + (i + 1) * kPrgSize);
+        if (isMultiCartStub(&bank[1]))
+        {
+            std::memcpy(&bank[1], kOriginalReset, sizeof(kOriginalReset));
+        }
+        uint32_t crc = crc32(bank.data(), bank.size());
+        if (i == 0)
+        {
+            firstCrc = crc;
+        }
+        if (crc == Cpu::kPrgCrc)
+        {
+            found = i;
+            break;
+        }
+    }
+    if (found == prgBanks)
     {
         char text[160];
-        std::snprintf(text, sizeof(text), "Unsupported ROM (PRG CRC %08X). Use Super Mario Bros. (World)", crc);
+        std::snprintf(text, sizeof(text), "Unsupported ROM (PRG CRC %08X). Use Super Mario Bros. (World) or Super Mario Bros. / Duck Hunt", firstCrc);
         error = text;
         return false;
     }
-    prgData.assign(data + offset, data + offset + kPrgSize);
-    chrData.assign(data + offset + kPrgSize, data + offset + kPrgSize + kChrSize);
+
+    size_t chrBank = found < chrBanks ? found : chrBanks - 1;
+    if (chrBanks > 1)
+    {
+        for (size_t i = 0; i < chrBanks; i++)
+        {
+            if (crc32(data + chrOffset + i * kChrSize, kChrSize) == kSmbChrCrc)
+            {
+                chrBank = i;
+                break;
+            }
+        }
+    }
+
+    prgData = bank;
+    chrData.assign(data + chrOffset + chrBank * kChrSize, data + chrOffset + (chrBank + 1) * kChrSize);
     isLoaded = true;
     return true;
 }
