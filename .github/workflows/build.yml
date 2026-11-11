@@ -10,9 +10,15 @@ on:
       - "**.md"
       - "LICENSE"
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: false
+        default: ""
 
 concurrency:
-  group: build-${{ github.ref }}
+  group: build-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -66,9 +72,15 @@ jobs:
 
       - name: Build APK
         working-directory: android
+        env:
+          SMB_VERSION: ${{ inputs.version }}
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease -PsmbNdkVersion="$SMB_NDK_VERSION" --build-cache --parallel --stacktrace
+          VERSION_ARGS=()
+          if [ -n "$SMB_VERSION" ]; then
+            VERSION_ARGS=(-PsmbVersionName="${SMB_VERSION#v}" -PsmbVersionCode="${{ github.run_number }}")
+          fi
+          ./gradlew assembleRelease -PsmbNdkVersion="$SMB_NDK_VERSION" "${VERSION_ARGS[@]}" --build-cache --parallel --stacktrace
           ccache --show-stats
 
       - uses: actions/upload-artifact@v4
