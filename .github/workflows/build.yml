@@ -150,3 +150,77 @@ jobs:
         with:
           name: SuperMarioBros-Linux
           path: build/SuperMarioBros
+
+  macos:
+    name: macOS (Universal)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: macos-${{ hashFiles('.gitmodules') }}
+          max-size: 500M
+
+      - name: Configure
+        env:
+          SMB_VERSION: ${{ inputs.version }}
+        run: |
+          VERSION="${SMB_VERSION#v}"
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+            -DSMB_VERSION="${VERSION:-1.0.0}" -DSMB_BUILD_NUMBER="${{ github.run_number }}"
+
+      - name: Build
+        run: |
+          cmake --build build --parallel "$(sysctl -n hw.ncpu)"
+          ccache --show-stats
+
+      - name: Package
+        run: |
+          codesign --force --deep --sign - build/SuperMarioBros.app
+          ditto -c -k --keepParent build/SuperMarioBros.app SuperMarioBros-macOS.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SuperMarioBros-macOS
+          path: SuperMarioBros-macOS.zip
+          compression-level: 0
+
+  ios:
+    name: iOS (arm64)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Configure
+        env:
+          SMB_VERSION: ${{ inputs.version }}
+        run: |
+          VERSION="${SMB_VERSION#v}"
+          cmake -S . -B build-ios -G Xcode -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DSMB_COMPILER_CACHE=OFF \
+            -DPython3_EXECUTABLE="$(command -v python3)" \
+            -DSMB_VERSION="${VERSION:-1.0.0}" -DSMB_BUILD_NUMBER="${{ github.run_number }}"
+
+      - name: Build
+        run: |
+          cmake --build build-ios --config Release -- -sdk iphoneos -quiet \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+
+      - name: Package IPA
+        run: |
+          APP="$(find build-ios -type d -name 'SuperMarioBros.app' -path '*Release-iphoneos*' | head -n 1)"
+          test -n "$APP"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qr -9 SuperMarioBros-iOS.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SuperMarioBros-iOS
+          path: SuperMarioBros-iOS.ipa
+          compression-level: 0

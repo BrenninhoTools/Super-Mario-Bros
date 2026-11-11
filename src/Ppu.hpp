@@ -35,7 +35,7 @@ private:
     uint8_t readVram(uint16_t address);
     void writeVram(uint16_t address, uint8_t value);
     uint16_t nametableIndex(uint16_t address) const;
-    uint8_t backgroundPixel(const ScrollState& state, int x, int y) const;
+    void renderBackground(const ScrollState& state, int line, uint8_t* out) const;
     void renderLine(int line, const ScrollState& state, uint32_t* row, bool& hitFound);
 
     const uint8_t* chr = nullptr;

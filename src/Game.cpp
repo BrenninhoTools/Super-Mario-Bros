@@ -74,9 +74,10 @@ void Game::runFrame(uint8_t pad1, uint8_t pad2)
     ppu.render(pixels.data());
 }
 
-int Game::produceAudio(int16_t* out, int maxSamples)
+int Game::produceAudio(int16_t* out, int maxSamples, double rate)
 {
-    sampleRemainder += sampleRate / kFrameRate;
+    apu.setRateAdjust(rate);
+    sampleRemainder += sampleRate * rate / kFrameRate;
     int count = (int)sampleRemainder;
     sampleRemainder -= count;
     if (count > maxSamples)

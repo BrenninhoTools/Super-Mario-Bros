@@ -1,6 +1,25 @@
 cmake_minimum_required(VERSION 3.16)
 
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum iOS version")
+elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND NOT CMAKE_SYSTEM_NAME)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum macOS version")
+endif()
+
 project(SuperMarioBros VERSION 1.0.0 LANGUAGES C CXX)
+
+if(APPLE)
+    enable_language(OBJC OBJCXX)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(SMB_IOS ON)
+else()
+    set(SMB_IOS OFF)
+endif()
+
+set(SMB_VERSION "${PROJECT_VERSION}" CACHE STRING "Version shown in app bundles")
+set(SMB_BUILD_NUMBER "1" CACHE STRING "Build number for app bundles")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -67,9 +86,11 @@ endif()
 
 set(SMB_SOURCES
     src/Apu.cpp
+    src/AudioOutput.cpp
     src/Bus.cpp
     src/Cpu.cpp
     src/Draw.cpp
+    src/FramePacer.cpp
     src/Game.cpp
     src/Main.cpp
     src/Ppu.cpp
@@ -78,9 +99,35 @@ set(SMB_SOURCES
     ${SMB_GENERATED_SOURCE}
 )
 
+if(SMB_IOS)
+    list(APPEND SMB_SOURCES src/IosPlatform.mm)
+    set_source_files_properties(src/IosPlatform.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+endif()
+
 if(ANDROID)
     add_library(main SHARED ${SMB_SOURCES})
     set(SMB_TARGET main)
+elseif(APPLE)
+    add_executable(SuperMarioBros MACOSX_BUNDLE ${SMB_SOURCES})
+    set(SMB_TARGET SuperMarioBros)
+    if(SMB_IOS)
+        set(SMB_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/platform/ios/Info.plist.in)
+    else()
+        set(SMB_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/platform/macos/Info.plist.in)
+    endif()
+    set_target_properties(SuperMarioBros PROPERTIES
+        MACOSX_BUNDLE_INFO_PLIST ${SMB_PLIST}
+        MACOSX_BUNDLE_BUNDLE_NAME "Super Mario Bros."
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.brenninhotools.supermariobros"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${SMB_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${SMB_BUILD_NUMBER}"
+        XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "com.brenninhotools.supermariobros"
+        XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
+        XCODE_ATTRIBUTE_ENABLE_BITCODE "NO"
+    )
+    if(SMB_IOS)
+        target_link_libraries(SuperMarioBros PRIVATE "-framework UIKit" "-framework UniformTypeIdentifiers")
+    endif()
 else()
     add_executable(SuperMarioBros WIN32 ${SMB_SOURCES})
     set(SMB_TARGET SuperMarioBros)

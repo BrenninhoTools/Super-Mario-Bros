@@ -44,6 +44,8 @@ jobs:
           (cd artifacts/SuperMarioBros-Windows && zip -9 "../../release/SuperMarioBros-$VERSION-Windows.zip" SuperMarioBros.exe)
           chmod +x artifacts/SuperMarioBros-Linux/SuperMarioBros
           tar -C artifacts/SuperMarioBros-Linux -czf "release/SuperMarioBros-$VERSION-Linux.tar.gz" SuperMarioBros
+          cp artifacts/SuperMarioBros-macOS/SuperMarioBros-macOS.zip "release/SuperMarioBros-$VERSION-macOS.zip"
+          cp artifacts/SuperMarioBros-iOS/SuperMarioBros-iOS.ipa "release/SuperMarioBros-$VERSION-iOS.ipa"
           (cd release && sha256sum * > SHA256SUMS.txt)
           ls -la release
 
@@ -58,7 +60,7 @@ jobs:
           fail_on_unmatched_files: true
           files: release/*
           body: |
-            Native C++ port of Super Mario Bros. for Android, Windows and Linux.
+            Native C++ port of Super Mario Bros. for Android, iOS, Windows, macOS and Linux.
 
             A ROM is required and is not included: **Super Mario Bros. (World)** or **Super Mario Bros. / Duck Hunt (USA)**.
 
@@ -67,3 +69,5 @@ jobs:
             | `SuperMarioBros-${{ inputs.version }}-Android.apk` | Android 8.0+ (arm64-v8a) |
             | `SuperMarioBros-${{ inputs.version }}-Windows.zip` | Windows x64 |
             | `SuperMarioBros-${{ inputs.version }}-Linux.tar.gz` | Linux x64 |
+            | `SuperMarioBros-${{ inputs.version }}-macOS.zip` | macOS 10.13+ (Apple Silicon and Intel) |
+            | `SuperMarioBros-${{ inputs.version }}-iOS.ipa` | iOS 14+ (unsigned, sideload with AltStore, SideStore or TrollStore) |

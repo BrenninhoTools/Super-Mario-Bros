@@ -21,7 +21,7 @@ public:
     bool loadRom(const uint8_t* data, size_t size, std::string& error);
     void reset();
     void runFrame(uint8_t pad1, uint8_t pad2);
-    int produceAudio(int16_t* out, int maxSamples);
+    int produceAudio(int16_t* out, int maxSamples, double rate = 1.0);
 
     void setSampleRate(int rate);
     const uint32_t* framebuffer() const { return pixels.data(); }

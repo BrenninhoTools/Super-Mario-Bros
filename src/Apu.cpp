@@ -14,6 +14,28 @@ const uint8_t kDutyTable[4][8] = {{0, 1, 0, 0, 0, 0, 0, 0}, {0, 1, 1, 0, 0, 0, 0
 const uint8_t kTriangleTable[32] = {15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
                                     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
 const uint16_t kNoisePeriods[16] = {4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068};
+
+struct MixerTables
+{
+    float pulse[31];
+    float tnd[203];
+
+    MixerTables()
+    {
+        pulse[0] = 0.0f;
+        for (int i = 1; i < 31; i++)
+        {
+            pulse[i] = 95.52f / (8128.0f / i + 100.0f);
+        }
+        tnd[0] = 0.0f;
+        for (int i = 1; i < 203; i++)
+        {
+            tnd[i] = 163.67f / (24329.0f / i + 100.0f);
+        }
+    }
+};
+
+const MixerTables kMixer;
 }
 
 void Apu::Envelope::clock()
@@ -89,7 +111,7 @@ void Apu::Pulse::clockSweep()
 
 uint8_t Apu::Pulse::output() const
 {
-    if (!enabled || length == 0 || muted() || !kDutyTable[duty][step])
+    if (!enabled || length == 0 || !kDutyTable[duty][step] || muted())
     {
         return 0;
     }
@@ -149,6 +171,7 @@ void Apu::reset(int sampleRate)
     fiveStep = false;
     sequencerStep = 0;
     sequencerCounter = kSequencerPeriod;
+    outputRate = sampleRate;
     cyclesPerSample = kCpuClock / sampleRate;
     cycleRemainder = 0.0;
     highPassPrev = highPassOut = lowPassOut = 0.0f;
@@ -158,6 +181,11 @@ void Apu::reset(int sampleRate)
     double rcLow = 1.0 / (2.0 * pi * 14000.0);
     highPassAlpha = (float)(rcHigh / (rcHigh + dt));
     lowPassAlpha = (float)(dt / (rcLow + dt));
+}
+
+void Apu::setRateAdjust(double rate)
+{
+    cyclesPerSample = kCpuClock / (outputRate * rate);
 }
 
 void Apu::writeRegister(uint16_t address, uint8_t value)
@@ -364,11 +392,7 @@ void Apu::generate(int16_t* out, int count)
         triangle.advance(cycles);
         noise.advance(cycles);
 
-        float pulses = (float)(pulse1.output() + pulse2.output());
-        float pulseOut = pulses > 0 ? 95.88f / (8128.0f / pulses + 100.0f) : 0.0f;
-        float tnd = triangle.output() / 8227.0f + noise.output() / 12241.0f;
-        float tndOut = tnd > 0 ? 159.79f / (1.0f / tnd + 100.0f) : 0.0f;
-        float sample = pulseOut + tndOut;
+        float sample = kMixer.pulse[pulse1.output() + pulse2.output()] + kMixer.tnd[3 * triangle.output() + 2 * noise.output()];
 
         highPassOut = highPassAlpha * (highPassOut + sample - highPassPrev);
         highPassPrev = sample;
@@ -383,7 +407,7 @@ void Apu::generate(int16_t* out, int count)
         {
             value = -1.0f;
         }
-        out[i] = (int16_t)std::lround(value * 32767.0f);
+        out[i] = (int16_t)std::lrintf(value * 32767.0f);
     }
 }
 }

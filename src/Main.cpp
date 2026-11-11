@@ -9,15 +9,20 @@
 #include <jni.h>
 #endif
 
+#if defined(__IPHONEOS__)
+#include "IosPlatform.hpp"
+#endif
+
+#include "AudioOutput.hpp"
 #include "Controller.hpp"
 #include "Draw.hpp"
+#include "FramePacer.hpp"
 #include "Game.hpp"
 #include "TouchControls.hpp"
 
 namespace
 {
 const char* kRomName = "baserom.nes";
-const double kFrameRate = 60.0988;
 const int kSampleRate = 48000;
 
 #if defined(__ANDROID__) || defined(__IPHONEOS__)
@@ -58,7 +63,10 @@ std::vector<std::string> romCandidates(int argc, char** argv)
         paths.push_back(argv[1]);
     }
     paths.push_back(storageDirectory() + kRomName);
-#if !defined(__ANDROID__)
+#if defined(__IPHONEOS__)
+    paths.push_back(smb::iosDocumentsDirectory() + kRomName);
+#endif
+#if !defined(__ANDROID__) && !defined(__IPHONEOS__)
     char* base = SDL_GetBasePath();
     if (base)
     {
@@ -100,7 +108,7 @@ bool copyFile(const std::string& from, const std::string& to)
     return written == data.size();
 }
 
-void requestRomPicker()
+void requestRomPicker(SDL_Window* window)
 {
 #if defined(__ANDROID__)
     JNIEnv* env = (JNIEnv*)SDL_AndroidGetJNIEnv();
@@ -121,6 +129,10 @@ void requestRomPicker()
     }
     env->DeleteLocalRef(cls);
     env->DeleteLocalRef(activity);
+#elif defined(__IPHONEOS__)
+    smb::iosRequestRom(window, storageDirectory() + kRomName);
+#else
+    (void)window;
 #endif
 }
 
@@ -257,6 +269,75 @@ struct Input
     }
 };
 
+int displayRefreshRate(SDL_Window* window)
+{
+    int index = SDL_GetWindowDisplayIndex(window);
+    SDL_DisplayMode mode = {};
+    if (index >= 0 && SDL_GetCurrentDisplayMode(index, &mode) == 0 && mode.refresh_rate > 0)
+    {
+        return mode.refresh_rate;
+    }
+    return 60;
+}
+
+struct PerformanceStats
+{
+    bool visible = false;
+    double windowTime = 0.0;
+    int windowFrames = 0;
+    int windowPresents = 0;
+    double windowWork = 0.0;
+    double gameFps = 0.0;
+    double presentFps = 0.0;
+    double workMs = 0.0;
+
+    void update(double elapsed, int frames, double work)
+    {
+        windowTime += elapsed;
+        windowFrames += frames;
+        windowPresents++;
+        windowWork += work;
+        if (windowTime >= 0.5)
+        {
+            gameFps = windowFrames / windowTime;
+            presentFps = windowPresents / windowTime;
+            workMs = windowFrames ? windowWork * 1000.0 / windowFrames : 0.0;
+            windowTime = windowWork = 0.0;
+            windowFrames = windowPresents = 0;
+        }
+    }
+
+    void draw(SDL_Renderer* renderer, const smb::FramePacer& pacer, const smb::AudioOutput& audio, int outputHeight) const
+    {
+        if (!visible)
+        {
+            return;
+        }
+        int scale = std::max(1, outputHeight / 360);
+        char lines[4][96];
+        std::snprintf(lines[0], sizeof(lines[0]), "GAME %.1f FPS  DISPLAY %.1f FPS", gameFps, presentFps);
+        std::snprintf(lines[1], sizeof(lines[1]), "FRAME %.2f MS", workMs);
+        if (pacer.locked())
+        {
+            std::snprintf(lines[2], sizeof(lines[2]), "VSYNC LOCK %dHZ / %d", pacer.refreshRate(), pacer.interval());
+        }
+        else
+        {
+            std::snprintf(lines[2], sizeof(lines[2]), "TIMER %dHZ", pacer.refreshRate());
+        }
+        std::snprintf(lines[3], sizeof(lines[3]), "AUDIO %d HZ  QUEUE %.1f MS", audio.sampleRate(),
+                      audio.sampleRate() ? audio.queuedSamples() * 1000.0 / audio.sampleRate() : 0.0);
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 170);
+        SDL_Rect panel = {4 * scale, 4 * scale, 220 * scale, 46 * scale};
+        SDL_RenderFillRect(renderer, &panel);
+        for (int i = 0; i < 4; i++)
+        {
+            smb::drawText(renderer, lines[i], 8 * scale, (8 + i * 10) * scale, scale, {120, 255, 120, 255}, false);
+        }
+    }
+};
+
 SDL_Rect gameViewport(int width, int height)
 {
     const int sourceHeight = 224;
@@ -315,20 +396,16 @@ int main(int argc, char** argv)
     }
     SDL_Texture* texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, smb::Ppu::kWidth, smb::Ppu::kHeight);
 
-    SDL_AudioSpec want = {};
-    want.freq = kSampleRate;
-    want.format = AUDIO_S16SYS;
-    want.channels = 1;
-    want.samples = 1024;
-    SDL_AudioSpec have = {};
-    SDL_AudioDeviceID audioDevice = SDL_OpenAudioDevice(nullptr, 0, &want, &have, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
-
+    smb::AudioOutput audio;
     smb::Game game;
-    if (audioDevice)
+    if (audio.open(kSampleRate, kMobile ? 1024 : 512, kMobile ? 3.0 : 2.0))
     {
-        game.setSampleRate(have.freq);
-        SDL_PauseAudioDevice(audioDevice, 0);
+        game.setSampleRate(audio.sampleRate());
     }
+
+    smb::FramePacer pacer;
+    pacer.setRefreshRate(displayRefreshRate(window));
+    PerformanceStats stats;
 
     std::string status;
     bool romLoaded = false;
@@ -357,20 +434,19 @@ int main(int argc, char** argv)
     touch.visible = kMobile;
 
     std::vector<int16_t> audioBuffer(4096);
-    const double frameSeconds = 1.0 / kFrameRate;
     const double frequency = (double)SDL_GetPerformanceFrequency();
     Uint64 previous = SDL_GetPerformanceCounter();
-    double accumulator = 0.0;
     double clock = 0.0;
     bool running = true;
     bool paused = false;
     bool userPaused = false;
     bool pickerRequested = false;
+    bool textureStale = true;
     int romPollTimer = 0;
 
     if (!romLoaded && kMobile)
     {
-        requestRomPicker();
+        requestRomPicker(window);
         pickerRequested = true;
     }
 
@@ -379,7 +455,13 @@ int main(int argc, char** argv)
         int outputWidth = 0;
         int outputHeight = 0;
         SDL_GetRendererOutputSize(renderer, &outputWidth, &outputHeight);
-        touch.layout(outputWidth, outputHeight);
+        float insetLeft = 0.0f;
+        float insetRight = 0.0f;
+        float insetBottom = 0.0f;
+#if defined(__IPHONEOS__)
+        smb::iosSafeAreaInsets(window, outputWidth, insetLeft, insetRight, insetBottom);
+#endif
+        touch.layout(outputWidth, outputHeight, insetLeft, insetRight, insetBottom);
 
         SDL_Event event;
         while (SDL_PollEvent(&event))
@@ -392,19 +474,19 @@ int main(int argc, char** argv)
             case SDL_APP_WILLENTERBACKGROUND:
             case SDL_APP_DIDENTERBACKGROUND:
                 paused = true;
-                if (audioDevice)
-                {
-                    SDL_PauseAudioDevice(audioDevice, 1);
-                    SDL_ClearQueuedAudio(audioDevice);
-                }
+                audio.pause(true);
                 break;
             case SDL_APP_DIDENTERFOREGROUND:
                 paused = false;
                 previous = SDL_GetPerformanceCounter();
-                accumulator = 0.0;
-                if (audioDevice)
+                pacer.reset();
+                audio.pause(false);
+                break;
+            case SDL_WINDOWEVENT:
+                if (event.window.event == SDL_WINDOWEVENT_MOVED || event.window.event == SDL_WINDOWEVENT_DISPLAY_CHANGED ||
+                    event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)
                 {
-                    SDL_PauseAudioDevice(audioDevice, 0);
+                    pacer.setRefreshRate(displayRefreshRate(window));
                 }
                 break;
             case SDL_KEYDOWN:
@@ -429,6 +511,10 @@ int main(int argc, char** argv)
                 else if (event.key.keysym.scancode == SDL_SCANCODE_P)
                 {
                     userPaused = !userPaused;
+                }
+                else if (event.key.keysym.scancode == SDL_SCANCODE_F3)
+                {
+                    stats.visible = !stats.visible;
                 }
                 touch.visible = false;
                 break;
@@ -486,21 +572,28 @@ int main(int argc, char** argv)
                 if (++romPollTimer >= 20)
                 {
                     romPollTimer = 0;
-                    std::string path = storageDirectory() + kRomName;
-                    if (fileExists(path))
+                    for (const std::string& path : romCandidates(1, argv))
                     {
+                        if (!fileExists(path))
+                        {
+                            continue;
+                        }
                         std::string error;
                         romLoaded = game.loadRom(path, error);
-                        if (!romLoaded)
+                        if (romLoaded)
                         {
-                            status = error;
+                            break;
+                        }
+                        status = error;
+                        if (path == storageDirectory() + kRomName)
+                        {
                             std::remove(path.c_str());
                         }
                     }
                 }
                 if (touch.tapped())
                 {
-                    requestRomPicker();
+                    requestRomPicker(window);
                     pickerRequested = true;
                 }
             }
@@ -526,15 +619,9 @@ int main(int argc, char** argv)
         Uint64 now = SDL_GetPerformanceCounter();
         double elapsed = (now - previous) / frequency;
         previous = now;
-        if (elapsed > 0.25)
-        {
-            elapsed = 0.25;
-        }
-        clock += elapsed;
-        if (!paused && !userPaused)
-        {
-            accumulator += elapsed;
-        }
+        clock += std::min(elapsed, 0.25);
+        bool active = !paused && !userPaused;
+        int frames = pacer.framesToRun(elapsed, active);
 
         uint8_t keyboard = Input::readKeyboard();
         uint8_t touchButtons = touch.buttons();
@@ -553,29 +640,24 @@ int main(int argc, char** argv)
             pad2 = pad1;
         }
 
-        int frames = 0;
-        while (accumulator >= frameSeconds && frames < 4)
+        Uint64 workStart = SDL_GetPerformanceCounter();
+        for (int i = 0; i < frames; i++)
         {
             game.runFrame(pad1, pad2);
-            accumulator -= frameSeconds;
-            frames++;
-            if (audioDevice)
+            if (audio.isOpen())
             {
-                int count = game.produceAudio(audioBuffer.data(), (int)audioBuffer.size());
-                Uint32 queued = SDL_GetQueuedAudioSize(audioDevice);
-                Uint32 limit = (Uint32)(have.freq / 10) * sizeof(int16_t);
-                if (queued < limit)
-                {
-                    SDL_QueueAudio(audioDevice, audioBuffer.data(), (Uint32)count * sizeof(int16_t));
-                }
+                int count = game.produceAudio(audioBuffer.data(), (int)audioBuffer.size(), audio.rateAdjust());
+                audio.submit(audioBuffer.data(), count);
             }
         }
-        if (accumulator > frameSeconds * 4)
-        {
-            accumulator = 0.0;
-        }
+        double work = (SDL_GetPerformanceCounter() - workStart) / frequency;
+        stats.update(std::min(elapsed, 0.25), frames, work);
 
-        SDL_UpdateTexture(texture, nullptr, game.framebuffer(), smb::Ppu::kWidth * sizeof(uint32_t));
+        if (frames > 0 || textureStale)
+        {
+            SDL_UpdateTexture(texture, nullptr, game.framebuffer(), smb::Ppu::kWidth * sizeof(uint32_t));
+            textureStale = false;
+        }
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
         SDL_Rect source = {0, 8, 256, 224};
@@ -599,8 +681,9 @@ int main(int argc, char** argv)
         {
             touch.draw(renderer);
         }
+        stats.draw(renderer, pacer, audio, outputHeight);
         SDL_RenderPresent(renderer);
-        if (frames == 0)
+        if (frames == 0 && !pacer.locked())
         {
             SDL_Delay(1);
         }
@@ -610,10 +693,7 @@ int main(int argc, char** argv)
     {
         SDL_GameControllerClose(controller);
     }
-    if (audioDevice)
-    {
-        SDL_CloseAudioDevice(audioDevice);
-    }
+    audio.close();
     SDL_DestroyTexture(texture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);

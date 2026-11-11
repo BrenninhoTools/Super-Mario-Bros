@@ -8,6 +8,7 @@ class Apu
 {
 public:
     void reset(int sampleRate);
+    void setRateAdjust(double rate);
     void writeRegister(uint16_t address, uint8_t value);
     uint8_t readStatus() const;
     void generate(int16_t* out, int count);
@@ -96,6 +97,7 @@ private:
     int sequencerStep = 0;
     int32_t sequencerCounter = 0;
     double cyclesPerSample = 0.0;
+    int outputRate = 48000;
     double cycleRemainder = 0.0;
     float highPassPrev = 0.0f;
     float highPassOut = 0.0f;

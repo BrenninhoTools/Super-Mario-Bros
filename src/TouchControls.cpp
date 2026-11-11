@@ -26,25 +26,28 @@ const SDL_Color kPillPressed = {90, 90, 90, 255};
 const SDL_Color kRunGlow = {255, 205, 40, 255};
 }
 
-void TouchControls::layout(int width, int height)
+void TouchControls::layout(int width, int height, float insetLeft, float insetRight, float insetBottom)
 {
     unit = (float)std::min(width, height);
     float margin = unit * 0.06f;
+    float left = std::max(margin, insetLeft);
+    float right = std::max(margin, insetRight);
+    float bottom = std::max(margin, insetBottom);
     stick.r = unit * 0.17f;
-    stick.x = margin + stick.r;
-    stick.y = height - margin - stick.r;
+    stick.x = left + stick.r;
+    stick.y = height - bottom - stick.r;
     buttonA.r = unit * 0.085f;
-    buttonA.x = width - margin - buttonA.r;
-    buttonA.y = height - margin - buttonA.r * 2.4f;
+    buttonA.x = width - right - buttonA.r;
+    buttonA.y = height - bottom - buttonA.r * 2.4f;
     buttonB.r = buttonA.r;
     buttonB.x = buttonA.x - buttonA.r * 2.5f;
-    buttonB.y = height - margin - buttonB.r;
+    buttonB.y = height - bottom - buttonB.r;
     buttonSelect.w = unit * 0.15f;
     buttonSelect.h = unit * 0.05f;
     buttonStart = buttonSelect;
     buttonSelect.x = width * 0.5f - buttonSelect.w - unit * 0.035f;
     buttonStart.x = width * 0.5f + unit * 0.035f;
-    buttonSelect.y = buttonStart.y = height - margin * 0.6f - buttonSelect.h;
+    buttonSelect.y = buttonStart.y = height - std::max(margin * 0.6f, insetBottom) - buttonSelect.h;
 }
 
 bool TouchControls::inCircle(const Circle& c, float x, float y, float scale) const

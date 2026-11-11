@@ -6,6 +6,31 @@ namespace smb
 {
 namespace
 {
+struct PatternTables
+{
+    uint64_t low[256];
+    uint64_t high[256];
+
+    PatternTables()
+    {
+        for (int value = 0; value < 256; value++)
+        {
+            uint8_t lo[8];
+            uint8_t hi[8];
+            for (int p = 0; p < 8; p++)
+            {
+                int bit = (value >> (7 - p)) & 1;
+                lo[p] = (uint8_t)bit;
+                hi[p] = (uint8_t)(bit << 1);
+            }
+            std::memcpy(&low[value], lo, 8);
+            std::memcpy(&high[value], hi, 8);
+        }
+    }
+};
+
+const PatternTables kPatternTables;
+
 const uint32_t kNesPalette[64] = {
     0x666666, 0x002A88, 0x1412A7, 0x3B00A4, 0x5C007E, 0x6E0040, 0x6C0600, 0x561D00,
     0x333500, 0x0B4800, 0x005200, 0x004F08, 0x00404D, 0x000000, 0x000000, 0x000000,
@@ -184,58 +209,77 @@ void Ppu::beginFrame()
     splitRequested = false;
 }
 
-uint8_t Ppu::backgroundPixel(const ScrollState& state, int x, int y) const
+void Ppu::renderBackground(const ScrollState& state, int line, uint8_t* out) const
 {
-    int wx = (state.x + x) & 511;
-    int wy = (state.y + y) % 480;
-    int table = (wx >> 8) + (wy >= 240 ? 2 : 0);
+    int wy = (state.y + line) % 480;
+    int tableRow = wy >= 240 ? 2 : 0;
     int py = wy % 240;
-    int tx = (wx & 255) >> 3;
     int ty = py >> 3;
-    uint16_t base = (uint16_t)(0x2000 + table * 0x400);
-    uint8_t tile = nametables[nametableIndex((uint16_t)(base + ty * 32 + tx))];
-    uint8_t attribute = nametables[nametableIndex((uint16_t)(base + 0x3C0 + (ty >> 2) * 8 + (tx >> 2)))];
-    int shift = ((ty & 2) << 1) | (tx & 2);
-    int group = (attribute >> shift) & 3;
-    int patternBase = (state.ctrl & 0x10) ? 0x1000 : 0;
     int fy = py & 7;
-    int fx = 7 - (wx & 7);
-    uint8_t lo = chr[patternBase + tile * 16 + fy];
-    uint8_t hi = chr[patternBase + tile * 16 + fy + 8];
-    int color = ((lo >> fx) & 1) | (((hi >> fx) & 1) << 1);
-    return color ? (uint8_t)((group << 2) | color) : 0;
+    int patternBase = (state.ctrl & 0x10) ? 0x1000 : 0;
+    int wx = state.x & 511;
+    int tileX = wx >> 3;
+    int attributeShift = (ty & 2) << 1;
+    int rowOffset = ty * 32;
+    int attributeRow = 0x3C0 + (ty >> 2) * 8;
+    uint8_t buffer[kWidth + 16];
+    for (int t = 0; t < 33; t++)
+    {
+        int table = tableRow + (tileX >> 5);
+        int tx = tileX & 31;
+        int base = table * 0x400;
+        uint8_t tile = nametables[(base + rowOffset + tx) & 0x7FF];
+        uint8_t attribute = nametables[(base + attributeRow + (tx >> 2)) & 0x7FF];
+        uint64_t group = (uint64_t)(((attribute >> (attributeShift | (tx & 2))) & 3) << 2);
+        const uint8_t* pattern = chr + patternBase + tile * 16 + fy;
+        uint64_t pixels = kPatternTables.low[pattern[0]] | kPatternTables.high[pattern[8]];
+        uint64_t opaque = (pixels | (pixels >> 1)) & 0x0101010101010101ull;
+        pixels |= opaque * group;
+        std::memcpy(buffer + t * 8, &pixels, 8);
+        tileX = (tileX + 1) & 63;
+    }
+    std::memcpy(out, buffer + (wx & 7), kWidth);
 }
 
 void Ppu::renderLine(int line, const ScrollState& state, uint32_t* row, bool& hitFound)
 {
     uint8_t background[kWidth];
     uint8_t sprite[kWidth];
-    bool behind[kWidth];
     std::memset(background, 0, sizeof(background));
-    std::memset(sprite, 0, sizeof(sprite));
-    std::memset(behind, 0, sizeof(behind));
 
     bool showBackground = (state.mask & 0x08) && chr;
     bool showSprites = (state.mask & 0x10) && chr;
     if (showBackground)
     {
-        int start = (state.mask & 0x02) ? 0 : 8;
-        for (int x = start; x < kWidth; x++)
+        renderBackground(state, line, background);
+        if (!(state.mask & 0x02))
         {
-            background[x] = backgroundPixel(state, x, line);
+            std::memset(background, 0, 8);
         }
     }
 
+    uint32_t colors[32];
+    uint8_t grayscale = (state.mask & 0x01) ? 0x30 : 0x3F;
+    for (int i = 0; i < 32; i++)
+    {
+        colors[i] = 0xFF000000u | kNesPalette[palette[i] & grayscale];
+    }
+    for (int i = 0x10; i < 0x20; i += 4)
+    {
+        colors[i] = colors[i - 0x10];
+    }
+
+    bool anySprite = false;
     if (showSprites)
     {
         int height = (state.ctrl & 0x20) ? 16 : 8;
         int found = 0;
+        int minX = (state.mask & 0x04) ? 0 : 8;
         for (int i = 0; i < 64; i++)
         {
             const uint8_t* entry = &oam[i * 4];
-            int top = entry[0] + 1;
-            int row8 = line - top;
-            if (row8 < 0 || row8 >= height)
+            int rowInSprite = line - (entry[0] + 1);
+            if (rowInSprite < 0 || rowInSprite >= height)
             {
                 continue;
             }
@@ -243,30 +287,41 @@ void Ppu::renderLine(int line, const ScrollState& state, uint32_t* row, bool& hi
             {
                 break;
             }
+            if (!anySprite)
+            {
+                std::memset(sprite, 0, sizeof(sprite));
+                anySprite = true;
+            }
             uint8_t tile = entry[1];
             uint8_t attributes = entry[2];
             int sx = entry[3];
             if (attributes & 0x80)
             {
-                row8 = height - 1 - row8;
+                rowInSprite = height - 1 - rowInSprite;
             }
             int address;
             if (height == 16)
             {
                 address = ((tile & 1) ? 0x1000 : 0) + (tile & 0xFE) * 16;
-                if (row8 >= 8)
+                if (rowInSprite >= 8)
                 {
                     address += 16;
-                    row8 -= 8;
+                    rowInSprite -= 8;
                 }
             }
             else
             {
                 address = ((state.ctrl & 0x08) ? 0x1000 : 0) + tile * 16;
             }
-            uint8_t lo = chr[address + row8];
-            uint8_t hi = chr[address + row8 + 8];
-            int minX = (state.mask & 0x04) ? 0 : 8;
+            uint8_t lo = chr[address + rowInSprite];
+            uint8_t hi = chr[address + rowInSprite + 8];
+            if (!(lo | hi))
+            {
+                continue;
+            }
+            uint8_t paletteBits = (uint8_t)(0x10 | ((attributes & 3) << 2));
+            uint8_t behind = (attributes & 0x20) ? 0x80 : 0;
+            bool flip = attributes & 0x40;
             for (int px = 0; px < 8; px++)
             {
                 int x = sx + px;
@@ -278,7 +333,7 @@ void Ppu::renderLine(int line, const ScrollState& state, uint32_t* row, bool& hi
                 {
                     continue;
                 }
-                int bit = (attributes & 0x40) ? px : 7 - px;
+                int bit = flip ? px : 7 - px;
                 int color = ((lo >> bit) & 1) | (((hi >> bit) & 1) << 1);
                 if (!color)
                 {
@@ -288,33 +343,35 @@ void Ppu::renderLine(int line, const ScrollState& state, uint32_t* row, bool& hi
                 {
                     hitFound = true;
                 }
-                if (sprite[x])
+                if (!sprite[x])
                 {
-                    continue;
+                    sprite[x] = (uint8_t)(behind | paletteBits | color);
                 }
-                sprite[x] = (uint8_t)(0x10 | ((attributes & 3) << 2) | color);
-                behind[x] = attributes & 0x20;
             }
         }
     }
 
-    uint8_t grayscale = (state.mask & 0x01) ? 0x30 : 0x3F;
+    uint32_t backdrop = colors[0];
+    if (!anySprite)
+    {
+        for (int x = 0; x < kWidth; x++)
+        {
+            row[x] = background[x] ? colors[background[x]] : backdrop;
+        }
+        return;
+    }
     for (int x = 0; x < kWidth; x++)
     {
-        uint8_t index;
-        if (sprite[x] && (!behind[x] || !background[x]))
+        uint8_t s = sprite[x];
+        uint8_t b = background[x];
+        if (s && (!(s & 0x80) || !b))
         {
-            index = palette[sprite[x] & 0x1F];
-        }
-        else if (background[x])
-        {
-            index = palette[background[x]];
+            row[x] = colors[s & 0x1F];
         }
         else
         {
-            index = palette[0];
+            row[x] = b ? colors[b] : backdrop;
         }
-        row[x] = 0xFF000000u | kNesPalette[index & grayscale & 0x3F];
     }
 }
 

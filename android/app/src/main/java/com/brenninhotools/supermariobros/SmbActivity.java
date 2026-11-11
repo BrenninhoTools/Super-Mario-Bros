@@ -3,6 +3,10 @@ package com.brenninhotools.supermariobros;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.PowerManager;
+import android.view.Display;
+import android.view.Window;
+import android.view.WindowManager;
 
 import org.libsdl.app.SDLActivity;
 
@@ -19,6 +23,62 @@ public class SmbActivity extends SDLActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        configureWindow();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            configureWindow();
+        }
+    }
+
+    private void configureWindow() {
+        Window window = getWindow();
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        PowerManager power = (PowerManager) getSystemService(POWER_SERVICE);
+        if (power != null && power.isSustainedPerformanceModeSupported()) {
+            window.setSustainedPerformanceMode(true);
+        }
+        selectDisplayMode(window);
+    }
+
+    private void selectDisplayMode(Window window) {
+        Display display = getWindowManager().getDefaultDisplay();
+        if (display == null) {
+            return;
+        }
+        Display.Mode current = display.getMode();
+        Display.Mode best = null;
+        float bestScore = Float.MAX_VALUE;
+        for (Display.Mode mode : display.getSupportedModes()) {
+            if (mode.getPhysicalWidth() != current.getPhysicalWidth() || mode.getPhysicalHeight() != current.getPhysicalHeight()) {
+                continue;
+            }
+            float rate = mode.getRefreshRate();
+            int multiple = Math.round(rate / 60.0988f);
+            if (multiple < 1 || multiple > 2) {
+                continue;
+            }
+            float deviation = Math.abs(rate / multiple - 60.0988f);
+            if (deviation > 1.5f) {
+                continue;
+            }
+            float score = deviation + (multiple == 2 ? 0.0f : 0.5f);
+            if (score < bestScore) {
+                bestScore = score;
+                best = mode;
+            }
+        }
+        if (best == null) {
+            return;
+        }
+        WindowManager.LayoutParams params = window.getAttributes();
+        if (params.preferredDisplayModeId != best.getModeId()) {
+            params.preferredDisplayModeId = best.getModeId();
+            window.setAttributes(params);
+        }
     }
 
     public void requestRom() {

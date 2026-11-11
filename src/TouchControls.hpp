@@ -10,7 +10,7 @@ namespace smb
 class TouchControls
 {
 public:
-    void layout(int width, int height);
+    void layout(int width, int height, float insetLeft = 0.0f, float insetRight = 0.0f, float insetBottom = 0.0f);
     void handleEvent(const SDL_Event& event, int outputWidth, int outputHeight);
     uint8_t buttons() const;
     void draw(SDL_Renderer* renderer) const;
