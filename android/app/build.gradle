@@ -5,7 +5,7 @@ plugins {
 android {
     namespace "com.brenninhotools.supermariobros"
     compileSdk 35
-    ndkVersion "27.2.12479018"
+    ndkVersion project.findProperty("smbNdkVersion") ?: "27.2.12479018"
 
     defaultConfig {
         applicationId "com.brenninhotools.supermariobros"
@@ -51,5 +51,6 @@ android {
 
     lint {
         abortOnError false
+        checkReleaseBuilds false
     }
 }

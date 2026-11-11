@@ -2,8 +2,24 @@ name: Build
 
 on:
   push:
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
   workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_COMPILERCHECK: content
+  CCACHE_NOHASHDIR: "true"
+  CCACHE_SLOPPINESS: time_macros,include_file_mtime,include_file_ctime,pch_defines
 
 jobs:
   android:
@@ -19,27 +35,46 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - uses: actions/setup-python@v5
+      - uses: gradle/actions/setup-gradle@v4
         with:
-          python-version: "3.12"
+          cache-read-only: ${{ github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }}
 
-      - name: Install NDK and CMake
+      - uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: android-${{ hashFiles('.gitmodules', 'android/app/build.gradle') }}
+          max-size: 500M
+
+      - name: Select NDK and CMake
         run: |
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          yes | "$SDKMANAGER" --licenses > /dev/null || true
-          "$SDKMANAGER" --install "ndk;27.2.12479018" "cmake;3.22.1"
+          NDK_DIR="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          if [ -n "$NDK_DIR" ] && [ -f "$NDK_DIR/source.properties" ]; then
+            NDK_VERSION="$(basename "$NDK_DIR")"
+          else
+            NDK_VERSION="27.2.12479018"
+            yes | "$SDKMANAGER" --licenses > /dev/null || true
+            "$SDKMANAGER" --install "ndk;$NDK_VERSION"
+          fi
+          if [ ! -d "$ANDROID_HOME/cmake/3.22.1" ]; then
+            yes | "$SDKMANAGER" --licenses > /dev/null || true
+            "$SDKMANAGER" --install "cmake;3.22.1"
+          fi
+          echo "NDK $NDK_VERSION"
+          echo "SMB_NDK_VERSION=$NDK_VERSION" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
 
       - name: Build APK
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon --stacktrace
+          ./gradlew assembleRelease -PsmbNdkVersion="$SMB_NDK_VERSION" --build-cache --parallel --stacktrace
+          ccache --show-stats
 
       - uses: actions/upload-artifact@v4
         with:
           name: SuperMarioBros-Android
           path: android/app/build/outputs/apk/release/*.apk
+          compression-level: 0
 
   windows:
     name: Windows (x64)
@@ -49,20 +84,28 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: actions/setup-python@v5
+      - uses: ilammy/msvc-dev-cmd@v1
         with:
-          python-version: "3.12"
+          arch: x64
+
+      - uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          variant: sccache
+          key: windows-${{ hashFiles('.gitmodules') }}
+          max-size: 500M
 
       - name: Configure
-        run: cmake -S . -B build -A x64
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
 
       - name: Build
-        run: cmake --build build --config Release --parallel
+        run: |
+          cmake --build build
+          sccache --show-stats
 
       - uses: actions/upload-artifact@v4
         with:
           name: SuperMarioBros-Windows
-          path: build/Release/SuperMarioBros.exe
+          path: build/SuperMarioBros.exe
 
   linux:
     name: Linux (x64)
@@ -72,18 +115,23 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ninja-build libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
-            libxss-dev libxkbcommon-dev libwayland-dev wayland-protocols libegl1-mesa-dev libgl1-mesa-dev \
-            libasound2-dev libpulse-dev libudev-dev libdbus-1-dev
+      - uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: ninja-build libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev libxkbcommon-dev libwayland-dev wayland-protocols libegl1-mesa-dev libgl1-mesa-dev libasound2-dev libpulse-dev libudev-dev libdbus-1-dev
+          version: 1.0
+
+      - uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: linux-${{ hashFiles('.gitmodules') }}
+          max-size: 500M
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        run: cmake --build build
+        run: |
+          cmake --build build
+          ccache --show-stats
 
       - uses: actions/upload-artifact@v4
         with:
