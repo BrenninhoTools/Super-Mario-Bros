@@ -23,10 +23,12 @@ jobs:
         with:
           python-version: "3.12"
 
-      - uses: android-actions/setup-android@v3
-
       - name: Install NDK and CMake
-        run: sdkmanager --install "ndk;27.2.12479018" "cmake;3.22.1"
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" --install "ndk;27.2.12479018" "cmake;3.22.1"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
 
       - name: Build APK
         working-directory: android
