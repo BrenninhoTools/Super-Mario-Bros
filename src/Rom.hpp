@@ -17,8 +17,12 @@ public:
     bool loaded() const { return isLoaded; }
 
     static uint32_t crc32(const uint8_t* data, size_t size);
+    static constexpr size_t kMaxFileSize = 16 * 1024 * 1024;
 
 private:
+    bool loadNes(const uint8_t* data, size_t size, std::string& error);
+    bool loadZip(const uint8_t* data, size_t size, std::string& error);
+
     std::vector<uint8_t> prgData;
     std::vector<uint8_t> chrData;
     bool isLoaded = false;

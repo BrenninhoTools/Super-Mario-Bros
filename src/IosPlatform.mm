@@ -24,7 +24,7 @@
     {
         [url stopAccessingSecurityScopedResource];
     }
-    if (!data || data.length > 4 * 1024 * 1024)
+    if (!data || data.length > 16 * 1024 * 1024)
     {
         return;
     }

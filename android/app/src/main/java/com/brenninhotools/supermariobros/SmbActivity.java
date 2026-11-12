@@ -121,7 +121,7 @@ public class SmbActivity extends SDLActivity {
             int read;
             while ((read = in.read(buffer)) != -1) {
                 total += read;
-                if (total > 4 * 1024 * 1024) {
+                if (total > 16 * 1024 * 1024) {
                     throw new Exception("ROM too large");
                 }
                 out.write(buffer, 0, read);

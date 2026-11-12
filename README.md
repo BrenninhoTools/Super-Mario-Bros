@@ -13,7 +13,9 @@ No Nintendo assets are included. You need your own dump of one of these cartridg
 
 The program checks the PRG data and only accepts these versions.
 
-- **Windows / Linux:** drag and drop the ROM onto the window on first launch, or place it next to the executable as `baserom.nes`, or pass its path as the first argument. It is copied to the user data folder so it only needs to be done once.
+The ROM can also be inside a `.zip` file: the archive is scanned and the first entry that is a supported ROM is used (`.nes` files are tried first, folders and `__MACOSX` entries are skipped). Stored and Deflate compression are supported; password-protected archives are not.
+
+- **Windows / Linux:** drag and drop the ROM (`.nes` or `.zip`) onto the window on first launch, or place it next to the executable as `baserom.nes`, or pass its path as the first argument. It is copied to the user data folder so it only needs to be done once.
 - **macOS:** drag the ROM onto the window or onto the app icon. The app is ad-hoc signed, so the first launch needs right-click → Open.
 - **Android:** the file picker opens on first launch. Select the ROM and it is stored in the app's private storage.
 - **iOS:** the file picker opens on first launch, or copy the ROM as `baserom.nes` into the app's folder in the Files app (On My iPhone → Super Mario Bros.). The IPA is unsigned, so install it with AltStore, SideStore or TrollStore.

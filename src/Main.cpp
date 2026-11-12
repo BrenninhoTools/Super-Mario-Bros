@@ -86,7 +86,7 @@ bool copyFile(const std::string& from, const std::string& to)
         return false;
     }
     Sint64 size = SDL_RWsize(in);
-    if (size <= 0 || size > 4 * 1024 * 1024)
+    if (size <= 0 || (size_t)size > smb::Rom::kMaxFileSize)
     {
         SDL_RWclose(in);
         return false;
@@ -730,8 +730,8 @@ int main(int argc, char** argv)
             int scale = std::max(2, std::min(outputWidth, outputHeight) / 160);
             SDL_Color white = {255, 255, 255, 255};
             SDL_Color red = {255, 110, 110, 255};
-            std::string message = kMobile ? "TAP THE SCREEN TO SELECT YOUR SUPER MARIO BROS. ROM (.NES)"
-                                          : "DRAG AND DROP YOUR SUPER MARIO BROS. ROM (.NES) ONTO THIS WINDOW";
+            std::string message = kMobile ? "TAP THE SCREEN TO SELECT YOUR SUPER MARIO BROS. ROM (.NES OR .ZIP)"
+                                          : "DRAG AND DROP YOUR SUPER MARIO BROS. ROM (.NES OR .ZIP) ONTO THIS WINDOW";
             smb::drawTextWrapped(renderer, message, outputWidth / 2, outputHeight / 2 - scale * 10, outputWidth * 8 / 10, scale, white);
             if (!status.empty())
             {

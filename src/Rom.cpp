@@ -2,10 +2,13 @@
 
 #include <SDL.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 
 #include "Cpu.hpp"
+#include "Zip.hpp"
 
 namespace smb
 {
@@ -15,6 +18,25 @@ const size_t kPrgSize = 0x8000;
 const size_t kChrSize = 0x2000;
 const uint32_t kSmbChrCrc = 0x406061CDu;
 const uint8_t kOriginalReset[8] = {0xD8, 0xA9, 0x10, 0x8D, 0x00, 0x20, 0xA2, 0xFF};
+
+const size_t kMaxRomSize = 4 * 1024 * 1024;
+
+bool hasExtension(const std::string& name, const char* extension)
+{
+    size_t length = std::strlen(extension);
+    if (name.size() < length)
+    {
+        return false;
+    }
+    for (size_t i = 0; i < length; i++)
+    {
+        if (std::tolower((unsigned char)name[name.size() - length + i]) != extension[i])
+        {
+            return false;
+        }
+    }
+    return true;
+}
 
 bool isMultiCartStub(const uint8_t* reset)
 {
@@ -45,7 +67,7 @@ bool Rom::loadFile(const std::string& path, std::string& error)
         return false;
     }
     Sint64 size = SDL_RWsize(file);
-    if (size <= 0 || size > 4 * 1024 * 1024)
+    if (size <= 0 || (size_t)size > kMaxFileSize)
     {
         SDL_RWclose(file);
         error = "Invalid ROM file size";
@@ -63,6 +85,82 @@ bool Rom::loadFile(const std::string& path, std::string& error)
 }
 
 bool Rom::loadMemory(const uint8_t* data, size_t size, std::string& error)
+{
+    isLoaded = false;
+    if (isZip(data, size))
+    {
+        return loadZip(data, size, error);
+    }
+    return loadNes(data, size, error);
+}
+
+bool Rom::loadZip(const uint8_t* data, size_t size, std::string& error)
+{
+    std::vector<ZipEntry> entries;
+    if (!listZip(data, size, entries))
+    {
+        error = "The ZIP file is damaged or empty";
+        return false;
+    }
+    std::vector<const ZipEntry*> candidates;
+    for (const ZipEntry& entry : entries)
+    {
+        bool folder = !entry.name.empty() && entry.name.back() == '/';
+        bool metadata = entry.name.compare(0, 9, "__MACOSX/") == 0;
+        if (folder || metadata || entry.uncompressedSize < kPrgSize + kChrSize || entry.uncompressedSize > kMaxRomSize)
+        {
+            continue;
+        }
+        candidates.push_back(&entry);
+    }
+    std::stable_sort(candidates.begin(), candidates.end(), [](const ZipEntry* a, const ZipEntry* b) {
+        return hasExtension(a->name, ".nes") && !hasExtension(b->name, ".nes");
+    });
+
+    std::string lastError;
+    bool sawEncrypted = false;
+    std::vector<uint8_t> content;
+    for (const ZipEntry* entry : candidates)
+    {
+        if (entry->encrypted)
+        {
+            sawEncrypted = true;
+            continue;
+        }
+        if (!extractZipEntry(data, size, *entry, content))
+        {
+            if (hasExtension(entry->name, ".nes"))
+            {
+                lastError = "Could not extract " + entry->name + " from the ZIP file";
+            }
+            continue;
+        }
+        std::string entryError;
+        if (loadNes(content.data(), content.size(), entryError))
+        {
+            return true;
+        }
+        if (hasExtension(entry->name, ".nes"))
+        {
+            lastError = entryError;
+        }
+    }
+    if (!lastError.empty())
+    {
+        error = lastError;
+    }
+    else if (sawEncrypted)
+    {
+        error = "The ZIP file is password protected";
+    }
+    else
+    {
+        error = "No Super Mario Bros. ROM was found in the ZIP file";
+    }
+    return false;
+}
+
+bool Rom::loadNes(const uint8_t* data, size_t size, std::string& error)
 {
     isLoaded = false;
     size_t prgOffset = 0;

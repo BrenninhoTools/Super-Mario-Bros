@@ -96,6 +96,7 @@ set(SMB_SOURCES
     src/Ppu.cpp
     src/Rom.cpp
     src/TouchControls.cpp
+    src/Zip.cpp
     ${SMB_GENERATED_SOURCE}
 )
 

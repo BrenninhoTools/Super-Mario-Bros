@@ -26,6 +26,7 @@
             <key>CFBundleTypeExtensions</key>
             <array>
                 <string>nes</string>
+                <string>zip</string>
             </array>
             <key>CFBundleTypeName</key>
             <string>NES ROM</string>
